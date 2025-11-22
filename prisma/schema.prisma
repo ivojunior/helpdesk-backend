@@ -1,0 +1,165 @@
+// backend/prisma/schema.prisma
+// Schema do banco de dados SQLite
+// DATABASE_URL=file:./data/helpdesk.db
+//  url      = env("DATABASE_URL")
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./data/helpdesk.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================
+// USUÁRIOS
+// ============================================
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  picture       String?
+  role          String   @default("user") // user, admin, manager
+  
+  // Relacionamentos
+  tickets       Ticket[]
+  assignedTickets Ticket[] @relation("AssignedTo")
+  comments      Comment[]
+  
+  // Metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastLoginAt   DateTime?
+
+  @@index([email])
+  @@index([role])
+}
+
+// ============================================
+// CHAMADOS (TICKETS)
+// ============================================
+model Ticket {
+  id            String   @id @default(cuid())
+  title         String
+  description   String
+  category      String   // technical, billing, general, other
+  priority      String   @default("medium") // low, medium, high, urgent
+  status        String   @default("open") // open, in_progress, resolved, closed
+  
+  // Requester info
+  requesterName  String
+  requesterEmail String
+  
+  // Relacionamentos
+  createdById   String
+  createdBy     User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  
+  assignedToId  String?
+  assignedTo    User?    @relation("AssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  
+  comments      Comment[]
+  attachments   Attachment[]
+  
+  // Metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  closedAt      DateTime?
+
+  @@index([status])
+  @@index([priority])
+  @@index([category])
+  @@index([createdById])
+  @@index([assignedToId])
+  @@fulltext([title, description]) // MySQL/PostgreSQL, ignorado em SQLite
+}
+
+// ============================================
+// COMENTÁRIOS
+// ============================================
+model Comment {
+  id            String   @id @default(cuid())
+  content       String
+  
+  // Relacionamentos
+  ticketId      String
+  ticket        Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  authorId      String
+  author        User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  attachments   Attachment[]
+  
+  // Metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([ticketId])
+  @@index([authorId])
+}
+
+// ============================================
+// ANEXOS
+// ============================================
+model Attachment {
+  id            String   @id @default(cuid())
+  filename      String
+  filesize      Int      // em bytes
+  filetype      String   // mime type
+  url           String   // caminho/URL do arquivo
+  
+  // Relacionamentos
+  ticketId      String?
+  ticket        Ticket?  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  commentId     String?
+  comment       Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  
+  uploadedById  String
+  uploadedBy    User     @relation(fields: [uploadedById], references: [id])
+  
+  // Metadata
+  createdAt     DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([commentId])
+}
+
+// ============================================
+// AUDITORIA (Logs)
+// ============================================
+model AuditLog {
+  id            String   @id @default(cuid())
+  action        String   // create, update, delete, login, logout
+  entityType    String   // Ticket, User, Comment
+  entityId      String
+  
+  changes       String?  // JSON das mudanças
+  userId        String
+  userEmail     String
+  
+  ipAddress     String?
+  userAgent     String?
+  
+  createdAt     DateTime @default(now())
+
+  @@index([action])
+  @@index([entityType])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ============================================
+// CONFIGURAÇÕES
+// ============================================
+model Setting {
+  id            String   @id @default(cuid())
+  key           String   @unique
+  value         String   // JSON string
+  description   String?
+  
+  updatedAt     DateTime @updatedAt
+  updatedBy     String?
+
+  @@index([key])
+}
