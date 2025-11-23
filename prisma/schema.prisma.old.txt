@@ -24,7 +24,6 @@ model User {
   tickets       Ticket[]
   assignedTickets Ticket[] @relation("AssignedTo")
   comments      Comment[]
-  attachments   Attachment[]
   
   // Metadata
   createdAt     DateTime @default(now())
@@ -70,6 +69,7 @@ model Ticket {
   @@index([category])
   @@index([createdById])
   @@index([assignedToId])
+  @@fulltext([title, description]) // MySQL/PostgreSQL, ignorado em SQLite
 }
 
 // ============================================
@@ -114,7 +114,7 @@ model Attachment {
   comment       Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
   
   uploadedById  String
-  uploadedBy    User     @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  uploadedBy    User     @relation(fields: [uploadedById], references: [id])
   
   // Metadata
   createdAt     DateTime @default(now())

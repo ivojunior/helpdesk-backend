@@ -25,14 +25,14 @@ export function getPrisma(): PrismaClient {
 
     // Log de queries em desenvolvimento
     if (process.env.NODE_ENV === 'development') {
-      prisma.$on('query', (e) => {
+      prisma.$on('query', (e: { query: any; params: any; duration: any; }) => {
         logger.debug(`Query: ${e.query}`);
         logger.debug(`Params: ${JSON.stringify(e.params)}`);
         logger.debug(`Duration: ${e.duration}ms`);
       });
     }
 
-    prisma.$on('error', (e) => {
+    prisma.$on('error', (e: any) => {
       logger.error('Prisma error:', e);
     });
   }

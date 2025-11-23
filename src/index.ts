@@ -141,10 +141,14 @@ declare global {
   namespace Express {
     interface Request {
       user?: {
-        sub: string;
+        id: string;
         email: string;
         name: string;
-        picture?: string;
+        picture?: string | null;
+        role: string;
+        createdAt: Date;
+        updatedAt: Date;
+        lastLoginAt: Date | null;
       };
     }
   }
