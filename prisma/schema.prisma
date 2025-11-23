@@ -1,11 +1,9 @@
 // backend/prisma/schema.prisma
 // Schema do banco de dados SQLite
-// DATABASE_URL=file:./data/helpdesk.db
-//  url      = env("DATABASE_URL")
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./data/helpdesk.db"
+  url      = env("DATABASE_URL")
 }
 
 generator client {

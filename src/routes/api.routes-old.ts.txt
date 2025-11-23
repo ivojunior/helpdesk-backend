@@ -3,7 +3,7 @@
 
 import { Router, Request, Response } from 'express';
 import { userService, ticketService, commentService, auditService } from '../services/database.service';
-import { authMiddleware, requireRole } from '../middleware/auth.middleware';
+import { authMiddleware } from '../middleware/auth.middleware';
 import { Logger } from '../services/logger.service';
 
 const logger = new Logger('API Routes');
@@ -13,7 +13,7 @@ const router = Router();
 // MIDDLEWARE
 // ============================================
 
-// Aplica auth middleware a todas as rotas
+// Apply auth middleware a todas as rotas
 router.use(authMiddleware);
 
 // ============================================
@@ -26,8 +26,12 @@ router.use(authMiddleware);
  */
 router.get('/users/me', async (req: Request, res: Response) => {
   try {
-    // Usuário já validado e disponível via middleware
-    const user = req.user!;
+    const userId = (req as any).user.sub;
+    const user = await userService.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
 
     res.json({
       success: true,
@@ -48,15 +52,30 @@ router.get('/users/me', async (req: Request, res: Response) => {
 
 /**
  * POST /api/users/register
- * Registrar novo usuário (login) - mantido para compatibilidade
- * Nota: O middleware já cria o usuário automaticamente se não existir
+ * Registrar novo usuário (login)
  */
 router.post('/users/register', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
+    const { email, name, picture } = req.body;
+
+    if (!email || !name) {
+      return res.status(400).json({ error: 'Email e nome são obrigatórios' });
+    }
+
+    // Verifica se usuário já existe
+    let user = await userService.findByEmail(email);
+
+    if (!user) {
+      // Cria novo usuário
+      user = await userService.create(email, name, picture);
+      logger.info(`Novo usuário registrado: ${email}`);
+    }
+
+    // Atualiza último login
+    await userService.updateLastLogin(user.id);
 
     // Registra auditoria
-    await auditService.log('login', 'User', user.id, user.id, user.email);
+    await auditService.log('login', 'User', user.id, user.id, email);
 
     res.json({
       success: true,
@@ -76,9 +95,9 @@ router.post('/users/register', async (req: Request, res: Response) => {
 
 /**
  * GET /api/users
- * Listar todos os usuários (admin/manager)
+ * Listar todos os usuários (admin)
  */
-router.get('/users', requireRole('admin', 'manager'), async (req: Request, res: Response) => {
+router.get('/users', async (req: Request, res: Response) => {
   try {
     const users = await userService.findAll();
     res.json({ success: true, users });
@@ -92,44 +111,18 @@ router.get('/users', requireRole('admin', 'manager'), async (req: Request, res: 
 // TICKETS
 // ============================================
 
-// IMPORTANTE: Rotas específicas ANTES de rotas com parâmetros
-
-/**
- * GET /api/tickets/stats/overview
- * Obter estatísticas de tickets
- */
-router.get('/tickets/stats/overview', async (req: Request, res: Response) => {
-  try {
-    const stats = await ticketService.countByStatus();
-
-    res.json({
-      success: true,
-      stats,
-    });
-  } catch (error) {
-    logger.error('Erro ao obter estatísticas:', error);
-    res.status(500).json({ error: 'Erro ao obter estatísticas' });
-  }
-});
-
 /**
  * GET /api/tickets
  * Listar tickets com filtros opcionais
  */
 router.get('/tickets', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
     const { status, priority, category } = req.query;
     const filters: any = {};
 
     if (status) filters.status = status;
     if (priority) filters.priority = priority;
     if (category) filters.category = category;
-
-    // Usuários comuns só veem seus próprios tickets
-    if (user.role === 'user') {
-      filters.createdById = user.id;
-    }
 
     const tickets = await ticketService.findMany(filters);
 
@@ -150,17 +143,11 @@ router.get('/tickets', async (req: Request, res: Response) => {
  */
 router.get('/tickets/:id', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
     const { id } = req.params;
     const ticket = await ticketService.findById(id);
 
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-
-    // Usuários comuns só podem ver seus próprios tickets
-    if (user.role === 'user' && ticket.createdById !== user.id) {
-      return res.status(403).json({ error: 'Acesso negado a este ticket' });
     }
 
     res.json({ success: true, ticket });
@@ -176,7 +163,14 @@ router.get('/tickets/:id', async (req: Request, res: Response) => {
  */
 router.post('/tickets', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
+    const tokenUser = (req as any).user;
+    // Valida se usuário existe no banco
+    const user = await userService.findById(tokenUser.sub);
+    if (!user) {
+      return res.status(401).json({ error: 'Usuário não encontrado no sistema' });
+    }
+    const userId = user.id;
+    
     const { title, description, category, priority, requesterName, requesterEmail } = req.body;
 
     if (!title || !description) {
@@ -189,13 +183,13 @@ router.post('/tickets', async (req: Request, res: Response) => {
       category: category || 'general',
       priority: priority || 'medium',
       status: 'open',
-      requesterName: requesterName || user.name,
-      requesterEmail: requesterEmail || user.email,
-      createdById: user.id,
+      requesterName,
+      requesterEmail,
+      createdById: userId,
     });
 
     // Registra auditoria
-    await auditService.log('create', 'Ticket', ticket.id, user.id, user.email);
+    await auditService.log('create', 'Ticket', ticket.id, userId, (req as any).user.email);
 
     res.status(201).json({
       success: true,
@@ -214,35 +208,20 @@ router.post('/tickets', async (req: Request, res: Response) => {
  */
 router.put('/tickets/:id', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
+    const userId = (req as any).user.sub;
     const { id } = req.params;
     const { status, priority, assignedToId, description } = req.body;
-
-    // Verifica se ticket existe
-    const existingTicket = await ticketService.findById(id);
-    if (!existingTicket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-
-    // Usuários comuns só podem atualizar seus próprios tickets
-    if (user.role === 'user' && existingTicket.createdById !== user.id) {
-      return res.status(403).json({ error: 'Acesso negado a este ticket' });
-    }
 
     const updateData: any = {};
     if (status) updateData.status = status;
     if (priority) updateData.priority = priority;
+    if (assignedToId) updateData.assignedToId = assignedToId;
     if (description) updateData.description = description;
-    
-    // Apenas admin/manager podem atribuir tickets
-    if (assignedToId && ['admin', 'manager'].includes(user.role)) {
-      updateData.assignedToId = assignedToId;
-    }
 
     const ticket = await ticketService.update(id, updateData);
 
     // Registra auditoria
-    await auditService.log('update', 'Ticket', id, user.id, user.email, updateData);
+    await auditService.log('update', 'Ticket', id, userId, (req as any).user.email, updateData);
 
     res.json({
       success: true,
@@ -261,24 +240,13 @@ router.put('/tickets/:id', async (req: Request, res: Response) => {
  */
 router.post('/tickets/:id/close', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
+    const userId = (req as any).user.sub;
     const { id } = req.params;
-
-    // Verifica se ticket existe
-    const existingTicket = await ticketService.findById(id);
-    if (!existingTicket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-
-    // Apenas admin/manager ou criador podem fechar
-    if (user.role === 'user' && existingTicket.createdById !== user.id) {
-      return res.status(403).json({ error: 'Acesso negado para fechar este ticket' });
-    }
 
     const ticket = await ticketService.close(id);
 
     // Registra auditoria
-    await auditService.log('close', 'Ticket', id, user.id, user.email);
+    await auditService.log('close', 'Ticket', id, userId, (req as any).user.email);
 
     res.json({
       success: true,
@@ -293,23 +261,17 @@ router.post('/tickets/:id/close', async (req: Request, res: Response) => {
 
 /**
  * DELETE /api/tickets/:id
- * Deletar ticket (apenas admin)
+ * Deletar ticket
  */
-router.delete('/tickets/:id', requireRole('admin'), async (req: Request, res: Response) => {
+router.delete('/tickets/:id', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
+    const userId = (req as any).user.sub;
     const { id } = req.params;
-
-    // Verifica se ticket existe
-    const existingTicket = await ticketService.findById(id);
-    if (!existingTicket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
 
     await ticketService.delete(id);
 
     // Registra auditoria
-    await auditService.log('delete', 'Ticket', id, user.id, user.email);
+    await auditService.log('delete', 'Ticket', id, userId, (req as any).user.email);
 
     res.json({
       success: true,
@@ -318,6 +280,24 @@ router.delete('/tickets/:id', requireRole('admin'), async (req: Request, res: Re
   } catch (error) {
     logger.error('Erro ao deletar ticket:', error);
     res.status(500).json({ error: 'Erro ao deletar ticket' });
+  }
+});
+
+/**
+ * GET /api/tickets/stats/overview
+ * Obter estatísticas de tickets
+ */
+router.get('/tickets/stats/overview', async (req: Request, res: Response) => {
+  try {
+    const stats = await ticketService.countByStatus();
+
+    res.json({
+      success: true,
+      stats,
+    });
+  } catch (error) {
+    logger.error('Erro ao obter estatísticas:', error);
+    res.status(500).json({ error: 'Erro ao obter estatísticas' });
   }
 });
 
@@ -331,19 +311,7 @@ router.delete('/tickets/:id', requireRole('admin'), async (req: Request, res: Re
  */
 router.get('/tickets/:ticketId/comments', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
     const { ticketId } = req.params;
-
-    // Verifica se ticket existe e se usuário tem acesso
-    const ticket = await ticketService.findById(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-
-    if (user.role === 'user' && ticket.createdById !== user.id) {
-      return res.status(403).json({ error: 'Acesso negado a este ticket' });
-    }
-
     const comments = await commentService.findByTicketId(ticketId);
 
     res.json({
@@ -363,7 +331,7 @@ router.get('/tickets/:ticketId/comments', async (req: Request, res: Response) =>
  */
 router.post('/tickets/:ticketId/comments', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
+    const userId = (req as any).user.sub;
     const { ticketId } = req.params;
     const { content } = req.body;
 
@@ -371,20 +339,10 @@ router.post('/tickets/:ticketId/comments', async (req: Request, res: Response) =
       return res.status(400).json({ error: 'Conteúdo do comentário é obrigatório' });
     }
 
-    // Verifica se ticket existe e se usuário tem acesso
-    const ticket = await ticketService.findById(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ error: 'Ticket não encontrado' });
-    }
-
-    if (user.role === 'user' && ticket.createdById !== user.id) {
-      return res.status(403).json({ error: 'Acesso negado a este ticket' });
-    }
-
-    const comment = await commentService.create(ticketId, user.id, content);
+    const comment = await commentService.create(ticketId, userId, content);
 
     // Registra auditoria
-    await auditService.log('create', 'Comment', comment.id, user.id, user.email);
+    await auditService.log('create', 'Comment', comment.id, userId, (req as any).user.email);
 
     res.status(201).json({
       success: true,
@@ -403,20 +361,13 @@ router.post('/tickets/:ticketId/comments', async (req: Request, res: Response) =
  */
 router.delete('/comments/:id', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
+    const userId = (req as any).user.sub;
     const { id } = req.params;
-
-    // Apenas admin ou autor do comentário pode deletar
-    // Nota: Seria necessário buscar o comentário para verificar autoria
-    // Por simplicidade, apenas admin pode deletar
-    if (user.role !== 'admin') {
-      return res.status(403).json({ error: 'Apenas administradores podem deletar comentários' });
-    }
 
     await commentService.delete(id);
 
     // Registra auditoria
-    await auditService.log('delete', 'Comment', id, user.id, user.email);
+    await auditService.log('delete', 'Comment', id, userId, (req as any).user.email);
 
     res.json({
       success: true,
@@ -436,7 +387,7 @@ router.delete('/comments/:id', async (req: Request, res: Response) => {
  * GET /api/audit/logs
  * Obter logs de auditoria (admin)
  */
-router.get('/audit/logs', requireRole('admin'), async (req: Request, res: Response) => {
+router.get('/audit/logs', async (req: Request, res: Response) => {
   try {
     const logs = await auditService.findAll();
 
@@ -453,18 +404,11 @@ router.get('/audit/logs', requireRole('admin'), async (req: Request, res: Respon
 
 /**
  * GET /api/audit/logs/user/:userId
- * Obter logs de um usuário (admin ou próprio usuário)
+ * Obter logs de um usuário
  */
 router.get('/audit/logs/user/:userId', async (req: Request, res: Response) => {
   try {
-    const user = req.user!;
     const { userId } = req.params;
-
-    // Apenas admin ou o próprio usuário pode ver seus logs
-    if (user.role !== 'admin' && user.id !== userId) {
-      return res.status(403).json({ error: 'Acesso negado' });
-    }
-
     const logs = await auditService.findByUser(userId);
 
     res.json({
