@@ -3,17 +3,18 @@
 
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import dotevn from 'dotenv';
 import path from 'path';
 import { initializeDatabase, disconnectDatabase, seedDatabase } from './services/database.service'
 import { Logger } from './services/logger.service';
 import apiRoutes from './routes/api.routes';
 
 // Carrega variáveis de ambiente
-dotenv.config({ path: path.join(__dirname, '../.env') });
+dotevn.config({ path: path.join(__dirname, '../.env') }); // Carrega variáveis padrão
+//dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const logger = new Logger('Server');
-logger.info(dotenv.config() ? 'Variáveis de ambiente carregadas' : 'Falha ao carregar variáveis de ambiente');
+logger.info(dotevn.config() ? 'Variáveis de ambiente carregadas' : 'Falha ao carregar variáveis de ambiente');
 logger.info(`NODE_ENV: ${process.env.NODE_ENV}`);
 logger.info(`DATABASE_URL: ${process.env.DATABASE_URL}`);
 const app: Express = express();

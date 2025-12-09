@@ -1,7 +1,7 @@
 // backend/src/services/database.service.ts
 // Serviço centralizado de banco de dados
-
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
+//import { PrismaClient } from '@prisma/client';
 import { Logger } from './logger.service';
 
 const logger = new Logger('Database');
@@ -20,19 +20,19 @@ export function getPrisma(): PrismaClient {
         { emit: 'event', level: 'info' },
         { emit: 'event', level: 'warn' },
         { emit: 'event', level: 'error' },
-      ],
+      ] as const,
     });
 
     // Log de queries em desenvolvimento
     if (process.env.NODE_ENV === 'development') {
-      prisma.$on('query', (e: { query: any; params: any; duration: any; }) => {
+      prisma.$on('query', (e: Prisma.QueryEvent) => {
         logger.debug(`Query: ${e.query}`);
-        logger.debug(`Params: ${JSON.stringify(e.params)}`);
+        logger.debug(`Params: ${e.params}`);
         logger.debug(`Duration: ${e.duration}ms`);
       });
     }
 
-    prisma.$on('error', (e: any) => {
+    prisma.$on( 'error', (e: Prisma.QueryEvent) => {
       logger.error('Prisma error:', e);
     });
   }
