@@ -5,7 +5,10 @@ import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import dotevn from 'dotenv';
 import path from 'path';
-import { initializeDatabase, disconnectDatabase, seedDatabase } from './services/database.service'
+import { seedDatabase } from './services/database.service';
+import { initializeDatabase } from './services/database.service';
+import { disconnectDatabase } from './services/database.service';
+//import { initializeDatabase, disconnectDatabase, seedDatabase } from './services/database.service'
 import { Logger } from './services/logger.service';
 import apiRoutes from './routes/api.routes';
 

@@ -1,20 +1,23 @@
 // backend/src/services/database.service.ts
 // Serviço centralizado de banco de dados
+
 import { PrismaClient, Prisma } from '@prisma/client';
-//import { PrismaClient } from '@prisma/client';
 import { Logger } from './logger.service';
 
 const logger = new Logger('Database');
 
-// Singleton do Prisma
-let prisma: PrismaClient | null = null;
+// Tipos de eventos que queremos habilitar no $on
+type PrismaLogEvents = 'query' | 'info' | 'warn' | 'error';
+
+// Singleton do Prisma, já tipado com os eventos de log
+let prisma: PrismaClient<Prisma.PrismaClientOptions, PrismaLogEvents> | null = null;
 
 /**
  * Obtém instância do Prisma
  */
-export function getPrisma(): PrismaClient {
+export function getPrisma(): PrismaClient<Prisma.PrismaClientOptions, PrismaLogEvents> {
   if (!prisma) {
-    prisma = new PrismaClient({
+    prisma = new PrismaClient<Prisma.PrismaClientOptions, PrismaLogEvents>({
       log: [
         { emit: 'event', level: 'query' },
         { emit: 'event', level: 'info' },
@@ -32,7 +35,7 @@ export function getPrisma(): PrismaClient {
       });
     }
 
-    prisma.$on( 'error', (e: Prisma.QueryEvent) => {
+    prisma.$on('error', (e: Prisma.LogEvent) => {
       logger.error('Prisma error:', e);
     });
   }
